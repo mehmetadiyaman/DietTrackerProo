@@ -1,0 +1,99 @@
+
+
+---
+
+### 🚀 **Professional AI Prompt: Dietçim - Dietitian Client Tracking Application**  
+
+#### **🎯 Project Description:**  
+This project is designed to help dietitians effectively communicate with their clients, create personalized nutrition plans, and track their health goals. It should be a **modern, fast, and user-friendly platform** with a **well-structured backend and an elegant frontend**.  
+
+📌 **IMPORTANT:** The entire project, including UI, messages, and any textual content, **must be in Turkish**. Ensure that all interface elements, notifications, and user interactions are fully localized in Turkish.  
+
+---
+
+## **📌 Technical Requirements**  
+
+### **🔹 Frontend:**  
+✅ **Next.js** (React-based modern framework)  
+✅ **Tailwind CSS** (Fast, flexible, and stylish design)  
+✅ **Hero UI (Next UI)** (Modern UI components)  
+
+### **🔹 Backend:**  
+✅ **Express.js** (Fast and scalable REST API)  
+✅ **MongoDB + Mongoose** (Database management)  
+✅ **JWT (Access - Refresh Token)** (Secure authentication)  
+✅ **bcryptjs** (Password encryption and security)  
+✅ **Nodemailer** (Email notifications)  
+✅ **Cloudinary** (Image upload and management)  
+✅ **Telegram Bot API** (Client communication integration)  
+✅ **Medium Blog API** (Fetch latest health and nutrition content)  
+
+### **🔹 MVC Architecture**  
+✅ **Models:** User, Client, Diet Plan, Measurement, Appointment  
+✅ **Views:** EJS + Tailwind CSS for dynamic pages  
+✅ **Controllers:** Modular logic handlers  
+✅ **Routes:** RESTful API endpoints  
+
+---
+
+## **🌟 Key Features**  
+
+✅ **Client Tracking**: Monitor users’ personal details and progress.  
+✅ **Diet Plan Management**: Create personalized diet plans and share them as PDF files.  
+✅ **Predefined Diet Lists**: Select from pre-created diet plans.  
+✅ **Appointment Management**: Schedule and track upcoming consultations.  
+✅ **Body Measurement Analysis**: Record and analyze user measurements with charts.  
+✅ **PDF Export**: Automatically generate diet plans in PDF format.  
+✅ **Telegram Bot Integration**: Send automated messages to clients.  
+✅ **Calorie Calculation**: Calculate using the Mifflin-St Jeor formula.  
+✅ **Body Fat Percentage Analysis**: Estimate based on weight, gender, and measurements.  
+✅ **Statistics & Charts**: Visualize client data and progress.  
+✅ **Medium Blog Integration**: Display the latest health-related articles.  
+✅ **Theme Support**: Dark / Light mode options.  
+
+---
+
+## **🎨 Design Requirements**  
+
+🔸 **Modern & User-Friendly UI**: Clean and professional design.  
+🔸 **Fully Responsive**: Works seamlessly on all devices.  
+🔸 **Hero UI + Tailwind CSS**: Consistent and visually appealing UI components.  
+🔸 **Cloudinary Integration**: Manage images effectively.  
+
+---
+
+## **🛠 Setup & Deployment**  
+
+1️⃣ **Install Dependencies:**  
+```sh
+npm install express mongoose bcryptjs jsonwebtoken nodemailer dotenv multer cloudinary
+```
+2️⃣ **Set Up .env File:**  
+```ini
+MONGODB_URI=mongodb+srv://username:password@cluster0.mongodb.net/dbname
+JWT_SECRET=your_secret_key
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+TELEGRAM_TOKEN=your_telegram_bot_token
+```
+3️⃣ **Run the Server:**  
+```sh
+npm run dev
+```
+
+---
+
+## **🛠 Additional Notes & Development Process**  
+
+🔹 **All features must be fully implemented and tested.**  
+🔹 **Each new feature should be structured within the appropriate folder/file architecture.**  
+🔹 **New API routes and models can be added as needed.**  
+🔹 **Every addition must comply with the project’s core architecture.**  
+
+📌 **The project should be fully functional, scalable, and professionally designed.**  
+
+📌 **Remember: ALL text and content within the project must be in Turkish.**  
+
+---  
+
