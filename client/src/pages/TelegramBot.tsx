@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import React, { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -27,13 +27,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { Badge } from "@/components/ui/badge";
+import { toast } from 'react-hot-toast';
 
 // Telegram settings form schema
 const telegramSettingsSchema = z.object({
   telegramToken: z.string().min(1, "Telegram Bot Token gereklidir"),
-  telegramChatId: z.string().optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -57,36 +57,42 @@ interface MessageTemplate {
 interface MessageHistoryItem {
   id: number;
   clientName: string;
-  clientId: number;
+  clientId: string;
   message: string;
   date: string;
   status: "sent" | "failed" | "pending";
 }
 
+// Add Client interface
+interface Client {
+  _id: string;
+  name: string;
+  profilePicture?: string;
+  gender?: string;
+  telegramChatId?: string;
+  email?: string;
+  status?: string;
+  referenceCode?: string;
+}
+
 export default function TelegramBot() {
-  const { toast } = useToast();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("settings");
   const [selectedTemplate, setSelectedTemplate] = useState<MessageTemplate | null>(null);
-  const [selectedClients, setSelectedClients] = useState<number[]>([]);
+  const [selectedClients, setSelectedClients] = useState<string[]>([]);
   const [allClientsSelected, setAllClientsSelected] = useState(false);
+  const [messageHistory, setMessageHistory] = useState<MessageHistoryItem[]>([]);
 
-  // Sample templates - would come from API in real implementation
+  // Default templates
   const [templates, setTemplates] = useState<MessageTemplate[]>([
     { id: 1, name: "Hoş Geldiniz", content: "Merhaba {{AD_SOYAD}}! Dietçim uygulamasına hoş geldiniz. Sizin için kişiselleştirilmiş diyet planınızı oluşturduk. Herhangi bir sorunuz olursa lütfen bize ulaşın." },
     { id: 2, name: "Ölçüm Hatırlatma", content: "Merhaba {{AD_SOYAD}}! Haftalık ölçümlerinizi yapma zamanı geldi. Lütfen ölçümlerinizi yapıp sonuçları bize iletebilir misiniz?" },
     { id: 3, name: "Randevu Hatırlatma", content: "Merhaba {{AD_SOYAD}}! Yarın saat {{SAAT}}'da randevunuz bulunmaktadır. Hatırlatmak isteriz." }
   ]);
 
-  // Sample message history - would come from API in real implementation
-  const [messageHistory, setMessageHistory] = useState<MessageHistoryItem[]>([
-    { id: 1, clientName: "Zeynep Kaya", clientId: 1, message: "Merhaba Zeynep! Yarın saat 14:30'da randevunuz bulunmaktadır. Hatırlatmak isteriz.", date: "2023-05-15T14:30:00", status: "sent" },
-    { id: 2, clientName: "Ahmet Yılmaz", clientId: 2, message: "Merhaba Ahmet! Haftalık ölçümlerinizi yapma zamanı geldi. Lütfen ölçümlerinizi yapıp sonuçları bize iletebilir misiniz?", date: "2023-05-14T10:15:00", status: "sent" },
-    { id: 3, clientName: "Ayşe Demir", clientId: 3, message: "Merhaba Ayşe! Dietçim uygulamasına hoş geldiniz. Sizin için kişiselleştirilmiş diyet planınızı oluşturduk. Herhangi bir sorunuz olursa lütfen bize ulaşın.", date: "2023-05-10T09:45:00", status: "failed" }
-  ]);
-
   // Fetch clients from API
-  const { data: clients, isLoading: clientsLoading } = useQuery({
+  const { data: clients, isLoading: clientsLoading } = useQuery<Client[]>({
     queryKey: ['/api/clients'],
     queryFn: async () => {
       const response = await fetch('/api/clients', {
@@ -99,15 +105,84 @@ export default function TelegramBot() {
     }
   });
 
-  // Settings form
+  // Fetch user data for Telegram settings
+  const { data: userData, isLoading: userDataLoading } = useQuery({
+    queryKey: ['/api/auth/me'],
+    queryFn: async () => {
+      const response = await fetch('/api/auth/me', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (!response.ok) throw new Error('Kullanıcı bilgileri alınamadı');
+      return response.json();
+    }
+  });
+
+  // Fetch activity data for message history
+  const { data: activities, isLoading: activitiesLoading } = useQuery({
+    queryKey: ['/api/activities', { type: 'telegram' }],
+    queryFn: async () => {
+      const response = await fetch('/api/activities?type=telegram&limit=20', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (!response.ok) throw new Error('Aktivite geçmişi alınamadı');
+      return response.json();
+    }
+  });
+
+  // Update message history based on activities
+  useEffect(() => {
+    if (activities && activities.activities) {
+      const newHistory: MessageHistoryItem[] = activities.activities.map((activity: any, index: number) => {
+        const description = activity.description;
+        const clientMatch = description.match(/(\d+) danışana Telegram mesajı gönderildi/);
+        const clientCount = clientMatch ? parseInt(clientMatch[1]) : 1;
+
+        return {
+          id: index,
+          clientName: clientCount > 1 ? `${clientCount} danışan` : "Danışan",
+          clientId: "multiple",
+          message: description,
+          date: activity.createdAt,
+          status: "sent"
+        };
+      });
+
+      setMessageHistory(newHistory);
+    }
+  }, [activities]);
+
+  // Initialize settings form with user data
   const settingsForm = useForm<TelegramSettingsValues>({
     resolver: zodResolver(telegramSettingsSchema),
     defaultValues: {
-      telegramToken: user?.telegramToken || "",
-      telegramChatId: user?.telegramChatId || "",
+      telegramToken: "",
       isActive: true,
     },
   });
+
+  // Update form values when user data is loaded
+  useEffect(() => {
+    if (userData && userData.telegramToken) {
+      settingsForm.setValue('telegramToken', userData.telegramToken);
+    }
+  }, [userData, settingsForm]);
+
+  // Bot durumu için hesaplanmış değer
+  const isBotActive = userData?.telegramToken ? true : false;
+
+  // Seçilen sekmeye göre otomatik bot durum kontrolü
+  useEffect(() => {
+    if (activeTab === "messages" && !isBotActive) {
+      toast.error("Bot aktif değil. Lütfen önce 'Bot Ayarları' sekmesinden botu başlatın.", {
+        duration: 5000,
+        id: "bot-inactive-warning"
+      });
+    }
+  }, [activeTab, isBotActive]);
 
   // Template form
   const templateForm = useForm<MessageTemplateValues>({
@@ -126,7 +201,7 @@ export default function TelegramBot() {
   });
 
   // Update template form when selecting a template
-  React.useEffect(() => {
+  useEffect(() => {
     if (selectedTemplate) {
       templateForm.reset({
         name: selectedTemplate.name,
@@ -141,7 +216,7 @@ export default function TelegramBot() {
   }, [selectedTemplate, templateForm]);
 
   // Update message form when selecting a template
-  React.useEffect(() => {
+  useEffect(() => {
     if (selectedTemplate) {
       messageForm.setValue("message", selectedTemplate.content);
     } else {
@@ -149,137 +224,136 @@ export default function TelegramBot() {
     }
   }, [selectedTemplate, messageForm]);
 
-  // Save Telegram settings mutation
-  const saveTelegramSettingsMutation = useMutation({
+  // Initialize Telegram bot mutation
+  const initializeBotMutation = useMutation({
     mutationFn: async (data: TelegramSettingsValues) => {
-      const response = await apiRequest("PUT", `/api/users/${user?.id}/telegram-settings`, data);
+      const response = await apiRequest("POST", "/api/telegram/initialize", {
+        token: data.telegramToken
+      });
       return response.json();
     },
     onSuccess: () => {
-      toast({
-        title: "Ayarlar Kaydedildi",
-        description: "Telegram bot ayarlarınız başarıyla kaydedildi.",
-      });
+      toast.success("Bot başarıyla başlatıldı ve mesaj göndermeye hazır.");
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
     },
     onError: (error: Error) => {
-      toast({
-        variant: "destructive",
-        title: "Hata",
-        description: `Telegram ayarları kaydedilirken bir hata oluştu: ${error.message}`,
-      });
+      toast.error(`Bot başlatılırken bir hata oluştu: ${error.message}`);
+    }
+  });
+
+  // Stop Telegram bot mutation
+  const stopBotMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/telegram/stop", {});
+      return response.json();
+    },
+    onSuccess: () => {
+      toast.success("Telegram botu durduruldu. Mesaj gönderemezsiniz.");
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+    },
+    onError: (error: Error) => {
+      toast.error(`Bot durdurulurken bir hata oluştu: ${error.message}`);
     }
   });
 
   // Save template mutation
   const saveTemplateMutation = useMutation({
     mutationFn: async (data: MessageTemplateValues) => {
-      // This would be an API call in real implementation
+      let updatedTemplates;
       if (selectedTemplate) {
-        // Update existing template
-        setTemplates(prev => 
-          prev.map(t => t.id === selectedTemplate.id ? { ...t, ...data } : t)
+        updatedTemplates = templates.map(t => 
+          t.id === selectedTemplate.id 
+            ? { ...t, name: data.name, content: data.content }
+            : t
         );
-        return { ...selectedTemplate, ...data };
       } else {
-        // Create new template
-        const newTemplate = { id: templates.length + 1, ...data };
-        setTemplates(prev => [...prev, newTemplate]);
-        return newTemplate;
+        const newId = templates.length > 0 
+          ? Math.max(...templates.map(t => t.id)) + 1 
+          : 1;
+        updatedTemplates = [...templates, { 
+          id: newId, 
+          name: data.name, 
+          content: data.content 
+        }];
       }
+      setTemplates(updatedTemplates);
+      return { success: true };
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
+      if (selectedTemplate) {
+        toast.success("Mesaj şablonu başarıyla güncellendi.");
+      } else {
+        toast.success("Yeni mesaj şablonu başarıyla oluşturuldu.");
+      }
       setSelectedTemplate(null);
-      templateForm.reset({
-        name: "",
-        content: "",
-      });
-      toast({
-        title: "Şablon Kaydedildi",
-        description: "Mesaj şablonu başarıyla kaydedildi.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        variant: "destructive",
-        title: "Hata",
-        description: `Şablon kaydedilirken bir hata oluştu: ${error.message}`,
-      });
+      templateForm.reset();
     }
   });
 
   // Delete template mutation
   const deleteTemplateMutation = useMutation({
-    mutationFn: async (templateId: number) => {
-      // This would be an API call in real implementation
-      setTemplates(prev => prev.filter(t => t.id !== templateId));
+    mutationFn: async (id: number) => {
+      const updatedTemplates = templates.filter(t => t.id !== id);
+      setTemplates(updatedTemplates);
       return { success: true };
     },
     onSuccess: () => {
+      toast.success("Mesaj şablonu başarıyla silindi.");
       setSelectedTemplate(null);
-      templateForm.reset({
-        name: "",
-        content: "",
-      });
-      toast({
-        title: "Şablon Silindi",
-        description: "Mesaj şablonu başarıyla silindi.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        variant: "destructive",
-        title: "Hata",
-        description: `Şablon silinirken bir hata oluştu: ${error.message}`,
-      });
+      templateForm.reset();
     }
   });
 
   // Send message mutation
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ clientIds, message }: { clientIds: number[], message: string }) => {
-      // This would be an API call in real implementation
-      const now = new Date().toISOString();
-      
-      // Create new message history items
-      const newMessages: MessageHistoryItem[] = clientIds.map(clientId => {
-        const client = clients.find(c => c.id === clientId);
-        return {
-          id: messageHistory.length + clientId,
-          clientName: client?.fullName || "Bilinmeyen Danışan",
-          clientId,
-          message,
-          date: now,
-          status: "sent"
-        };
-      });
-      
-      setMessageHistory(prev => [...newMessages, ...prev]);
-      return { success: true };
+    mutationFn: async (data: { clientIds: string[], message: string }) => {
+      const response = await apiRequest("POST", "/api/telegram/send-message", data);
+      return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      const { success, failed, error } = data;
+      
+      // Eğer bir hata mesajı varsa göster
+      if (error) {
+        toast.error(error);
+        return;
+      }
+      
+      let resultMessage = `${success.length} danışana mesaj başarıyla gönderildi.`;
+      if (failed && failed.length > 0) {
+        resultMessage += ` ${failed.length} danışana gönderilemedi.`;
+      }
+      
+      toast.success(resultMessage);
+      queryClient.invalidateQueries({ queryKey: ['/api/activities', { type: 'telegram' }] });
+      
+      messageForm.reset();
       setSelectedClients([]);
       setAllClientsSelected(false);
-      setSelectedTemplate(null);
-      messageForm.reset({
-        message: "",
-      });
-      toast({
-        title: "Mesaj Gönderildi",
-        description: "Mesajınız başarıyla gönderildi.",
-      });
     },
     onError: (error: Error) => {
-      toast({
-        variant: "destructive",
-        title: "Hata",
-        description: `Mesaj gönderilirken bir hata oluştu: ${error.message}`,
-      });
+      toast.error(`Mesaj gönderilirken hata: ${error.message}`);
+    }
+  });
+
+  // Referans kodu oluşturma mutation'ı
+  const generateReferenceMutation = useMutation({
+    mutationFn: async (clientId: string) => {
+      const response = await apiRequest("POST", `/api/clients/${clientId}/telegram-reference`, {});
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast.success(`Referans Kodu: ${data.referenceCode} - Bot: @${data.botName}`);
+      queryClient.invalidateQueries({ queryKey: ['/api/clients'] });
+    },
+    onError: (error: Error) => {
+      toast.error(`Referans kodu oluşturulurken hata: ${error.message}`);
     }
   });
 
   // Handle settings form submission
   function onSubmitSettings(values: TelegramSettingsValues) {
-    saveTelegramSettingsMutation.mutate(values);
+    initializeBotMutation.mutate(values);
   }
 
   // Handle template form submission
@@ -290,20 +364,18 @@ export default function TelegramBot() {
   // Handle message form submission
   function onSubmitMessage(values: { message: string }) {
     if (selectedClients.length === 0) {
-      toast({
-        variant: "destructive",
-        title: "Hata",
-        description: "Lütfen en az bir danışan seçin.",
-      });
+      toast.error("Lütfen en az bir danışan seçin.");
       return;
     }
 
     if (!values.message) {
-      toast({
-        variant: "destructive",
-        title: "Hata",
-        description: "Mesaj içeriği boş olamaz.",
-      });
+      toast.error("Mesaj içeriği boş olamaz.");
+      return;
+    }
+
+    if (!isBotActive) {
+      toast.error("Bot aktif değil. Lütfen önce 'Bot Ayarları' sekmesinden botu başlatın.");
+      setActiveTab("settings");
       return;
     }
 
@@ -314,7 +386,7 @@ export default function TelegramBot() {
   }
 
   // Toggle client selection
-  const toggleClientSelection = (clientId: number) => {
+  const toggleClientSelection = (clientId: string) => {
     setSelectedClients(prev => 
       prev.includes(clientId) 
         ? prev.filter(id => id !== clientId)
@@ -327,7 +399,7 @@ export default function TelegramBot() {
     if (allClientsSelected) {
       setSelectedClients([]);
     } else {
-      setSelectedClients(clients?.map(client => client.id) || []);
+      setSelectedClients(clients?.map((client: Client) => client._id) || []);
     }
     setAllClientsSelected(!allClientsSelected);
   };
@@ -387,23 +459,6 @@ export default function TelegramBot() {
                   
                   <FormField
                     control={settingsForm.control}
-                    name="telegramChatId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Telegram Chat ID (İsteğe Bağlı)</FormLabel>
-                        <FormControl>
-                          <Input placeholder="123456789" {...field} />
-                        </FormControl>
-                        <FormDescription>
-                          Kendinize bildirim almak istiyorsanız kendi Telegram ID'nizi girin.
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  
-                  <FormField
-                    control={settingsForm.control}
                     name="isActive"
                     render={({ field }) => (
                       <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
@@ -431,24 +486,46 @@ export default function TelegramBot() {
                     <ol className="list-decimal pl-5 text-sm text-blue-700 dark:text-blue-300 space-y-1">
                       <li>BotFather'dan bir Telegram botu oluşturun</li>
                       <li>Aldığınız token'ı yukarıdaki alana yapıştırın</li>
-                      <li>Danışanlarınızın bot ile iletişime geçmelerini sağlayın</li>
+                      <li>"Mesaj Gönder" sekmesinden her danışan için referans kodu oluşturun</li>
+                      <li>Danışanlarınızdan botu bulup "/start REFERANS_KODU" ile başlatmalarını isteyin</li>
+                      <li>Danışanlar botla eşleştiğinde profilleri yanında "Bot Bağlı" rozeti görünür</li>
                       <li>"Mesaj Gönder" sekmesinden toplu veya bireysel mesajlar gönderin</li>
                     </ol>
                   </div>
                   
-                  <Button 
-                    type="submit" 
-                    className="w-full md:w-auto"
-                    disabled={saveTelegramSettingsMutation.isPending}
-                  >
-                    {saveTelegramSettingsMutation.isPending ? (
-                      <>
-                        <i className="fas fa-spinner fa-spin mr-2"></i> Kaydediliyor...
-                      </>
-                    ) : (
-                      "Ayarları Kaydet"
+                  <div className="flex space-x-3">
+                    <Button 
+                      type="submit" 
+                      className="w-auto"
+                      disabled={initializeBotMutation.isPending}
+                    >
+                      {initializeBotMutation.isPending ? (
+                        <>
+                          <i className="fas fa-spinner fa-spin mr-2"></i> Başlatılıyor...
+                        </>
+                      ) : (
+                        "Botu Başlat"
+                      )}
+                    </Button>
+                    
+                    {userData?.telegramToken && (
+                      <Button 
+                        type="button" 
+                        variant="destructive"
+                        className="w-auto"
+                        disabled={stopBotMutation.isPending}
+                        onClick={() => stopBotMutation.mutate()}
+                      >
+                        {stopBotMutation.isPending ? (
+                          <>
+                            <i className="fas fa-spinner fa-spin mr-2"></i> Durduruluyor...
+                          </>
+                        ) : (
+                          "Botu Durdur"
+                        )}
+                      </Button>
                     )}
-                  </Button>
+                  </div>
                 </form>
               </Form>
             </CardContent>
@@ -621,29 +698,63 @@ export default function TelegramBot() {
                       </div>
                       
                       <div className="border-t pt-4 max-h-[400px] overflow-y-auto">
-                        {clients.map(client => (
-                          <div key={client.id} className="flex items-center space-x-2 py-2">
-                            <input
-                              type="checkbox"
-                              id={`client-${client.id}`}
-                              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                              checked={selectedClients.includes(client.id)}
-                              onChange={() => toggleClientSelection(client.id)}
-                            />
-                            <label htmlFor={`client-${client.id}`} className="flex items-center text-sm">
-                              <div className="h-8 w-8 mr-2 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
-                                {client.profileImage ? (
-                                  <img 
-                                    src={client.profileImage} 
-                                    alt={client.fullName}
-                                    className="h-full w-full object-cover" 
-                                  />
-                                ) : (
-                                  <i className={`fas fa-${client.gender === 'female' ? 'female' : 'male'}`}></i>
+                        {clients.map((client: Client) => (
+                          <div key={client._id} className="flex flex-col space-y-1 mb-3 border-b pb-3">
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                id={`client-${client._id}`}
+                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                checked={selectedClients.includes(client._id)}
+                                onChange={() => toggleClientSelection(client._id)}
+                              />
+                              <label htmlFor={`client-${client._id}`} className="flex items-center text-sm">
+                                <div className="h-8 w-8 mr-2 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
+                                  {client.profilePicture ? (
+                                    <img 
+                                      src={client.profilePicture} 
+                                      alt={client.name}
+                                      className="h-full w-full object-cover" 
+                                    />
+                                  ) : (
+                                    <i className={`fas fa-${client.gender === 'female' ? 'female' : 'male'}`}></i>
+                                  )}
+                                </div>
+                                {client.name}
+                                {client.telegramChatId && (
+                                  <Badge variant="outline" className="ml-2 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400">
+                                    <i className="fas fa-check text-xs mr-1"></i> Bot Bağlı
+                                  </Badge>
                                 )}
-                              </div>
-                              {client.fullName}
-                            </label>
+                              </label>
+                            </div>
+                            
+                            {/* Referans kodu bölümü */}
+                            <div className="pl-7 flex items-center justify-between">
+                              {client.referenceCode ? (
+                                <div className="text-xs flex items-center bg-gray-50 dark:bg-gray-800 rounded px-2 py-1">
+                                  <span className="text-gray-500 dark:text-gray-400 mr-1">Kod:</span> 
+                                  <code className="font-mono bg-gray-100 dark:bg-gray-700 px-1 rounded">{client.referenceCode}</code>
+                                </div>
+                              ) : (
+                                <div></div>
+                              )}
+                              
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="text-xs h-7 hover:bg-primary/10"
+                                onClick={() => generateReferenceMutation.mutate(client._id)}
+                                disabled={generateReferenceMutation.isPending}
+                              >
+                                {generateReferenceMutation.isPending ? (
+                                  <i className="fas fa-spinner fa-spin mr-1"></i>
+                                ) : (
+                                  <i className="fas fa-sync-alt mr-1"></i>
+                                )}
+                                {client.referenceCode ? "Yenile" : "Kod Oluştur"}
+                              </Button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -671,6 +782,35 @@ export default function TelegramBot() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
+                  {/* Bot durum göstergesi */}
+                  <div className={`mb-4 p-3 rounded-lg border ${isBotActive 
+                    ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' 
+                    : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
+                    <div className="flex items-center">
+                      <div className={`w-3 h-3 rounded-full mr-2 ${isBotActive 
+                        ? 'bg-green-500 dark:bg-green-400' 
+                        : 'bg-red-500 dark:bg-red-400'}`}></div>
+                      <span className={`text-sm font-medium ${isBotActive 
+                        ? 'text-green-700 dark:text-green-400' 
+                        : 'text-red-700 dark:text-red-400'}`}>
+                        {isBotActive 
+                          ? 'Bot Aktif - Mesaj göndermeye hazır' 
+                          : 'Bot Devre Dışı - Mesaj gönderilemez'}
+                      </span>
+                      {!isBotActive && (
+                        <Button 
+                          type="button" 
+                          variant="link" 
+                          size="sm" 
+                          className="ml-auto text-red-600 dark:text-red-400"
+                          onClick={() => setActiveTab("settings")}
+                        >
+                          Bot Ayarlarına Git
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
                   <form onSubmit={messageForm.handleSubmit(onSubmitMessage)} className="space-y-6">
                     <div>
                       <label className="block text-sm font-medium mb-1">Şablon Seç</label>
@@ -705,25 +845,37 @@ export default function TelegramBot() {
                       </p>
                     </div>
                     
-                    <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                    <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg space-y-3">
                       <h4 className="text-sm font-medium text-yellow-800 dark:text-yellow-300 mb-2">
                         <i className="fas fa-exclamation-triangle mr-2"></i>
-                        Önemli Hatırlatma
+                        Önemli Hatırlatmalar
                       </h4>
                       <p className="text-sm text-yellow-700 dark:text-yellow-300">
                         Mesaj göndermek için danışanların Telegram botunuzu başlatmış olması gerekir.
                         Danışanlar botunuzu başlatmadıysa mesajlar iletilemez.
+                      </p>
+                      <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                        Danışanlar botla eşleşmek için <strong>referans kodlarını</strong> kullanmalıdır.
+                        Her danışana özel bir referans kodu oluşturun ve botunuzu <code>/start REFERANS_KODU</code> 
+                        şeklinde başlatmalarını sağlayın. Sadece <code>/start</code> kullanarak başlatmak yeterli olmaz.
+                      </p>
+                      <p className="text-sm text-yellow-700 dark:text-yellow-300 font-semibold">
+                        <i className="fas fa-info-circle mr-1"></i> Mesaj göndermeden önce "Bot Ayarları" sekmesinden botu başlattığınızdan emin olun. Bot durdurulduysa mesaj gönderemezsiniz.
                       </p>
                     </div>
                     
                     <Button 
                       type="submit" 
                       className="w-full md:w-auto"
-                      disabled={sendMessageMutation.isPending || selectedClients.length === 0}
+                      disabled={sendMessageMutation.isPending || selectedClients.length === 0 || !userData?.telegramToken}
                     >
                       {sendMessageMutation.isPending ? (
                         <>
                           <i className="fas fa-spinner fa-spin mr-2"></i> Gönderiliyor...
+                        </>
+                      ) : !userData?.telegramToken ? (
+                        <>
+                          <i className="fas fa-exclamation-circle mr-2"></i> Bot Ayarları Gerekli
                         </>
                       ) : (
                         <>
@@ -750,7 +902,11 @@ export default function TelegramBot() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {messageHistory.length === 0 ? (
+              {activitiesLoading ? (
+                <div className="flex justify-center py-8">
+                  <i className="fas fa-spinner fa-spin text-primary text-xl"></i>
+                </div>
+              ) : messageHistory.length === 0 ? (
                 <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                   <i className="far fa-comment-dots text-5xl mb-3"></i>
                   <p>Henüz gönderilmiş mesaj bulunmuyor.</p>
@@ -761,8 +917,7 @@ export default function TelegramBot() {
                     <thead>
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tarih</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Danışan</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Mesaj</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">İşlem</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Durum</th>
                       </tr>
                     </thead>
@@ -778,15 +933,7 @@ export default function TelegramBot() {
                               minute: '2-digit'
                             })}
                           </td>
-                          <td className="px-4 py-4 whitespace-nowrap text-sm">
-                            <div className="flex items-center">
-                              <div className="h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center mr-2">
-                                <i className="fas fa-user text-gray-500 dark:text-gray-400"></i>
-                              </div>
-                              <span className="text-gray-900 dark:text-gray-100">{message.clientName}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4 text-sm text-gray-900 dark:text-gray-100 max-w-sm truncate">
+                          <td className="px-4 py-4 text-sm text-gray-900 dark:text-gray-100">
                             {message.message}
                           </td>
                           <td className="px-4 py-4 whitespace-nowrap text-sm">

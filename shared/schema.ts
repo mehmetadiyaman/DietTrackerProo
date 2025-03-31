@@ -1,164 +1,187 @@
-import { pgTable, text, serial, numeric, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Users (Diyetisyenler)
-export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
-  email: text("email").notNull().unique(),
-  fullName: text("full_name").notNull(),
-  profileImage: text("profile_image"),
-  telegramToken: text("telegram_token"),
-  telegramChatId: text("telegram_chat_id"),
-  createdAt: timestamp("created_at").defaultNow(),
+// Ortak mongo id tipi - tüm formlarda tutarlı _id kullanımı için
+export const mongoIdSchema = z.string().min(1, "ID geçerli değil");
+
+// MongoDB modellerine uyumlu validasyon şemaları
+export const userSchema = z.object({
+  name: z.string().min(2, "İsim en az 2 karakter olmalıdır"),
+  email: z.string().email("Geçerli bir e-posta adresi giriniz"),
+  password: z.string().min(6, "Şifre en az 6 karakter olmalıdır"),
+  profilePicture: z.string().optional(),
+  bio: z.string().optional(),
+  phone: z.string().optional()
 });
 
-// Clients (Danışanlar)
-export const clients = pgTable("clients", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
-  fullName: text("full_name").notNull(),
-  email: text("email").notNull(),
-  phone: text("phone").notNull(),
-  birthDate: timestamp("birth_date"),
-  gender: text("gender").notNull(),
-  profileImage: text("profile_image"),
-  height: numeric("height"),
-  startingWeight: numeric("starting_weight"),
-  targetWeight: numeric("target_weight"),
-  activityLevel: text("activity_level"),
-  medicalHistory: text("medical_history"),
-  dietaryRestrictions: text("dietary_restrictions"),
-  telegramChatId: text("telegram_chat_id"),
-  notes: text("notes"),
-  isActive: boolean("is_active").default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-// Measurements (Ölçümler)
-export const measurements = pgTable("measurements", {
-  id: serial("id").primaryKey(),
-  clientId: integer("client_id").notNull().references(() => clients.id),
-  date: timestamp("date").defaultNow(),
-  weight: numeric("weight"),
-  chest: numeric("chest"),
-  waist: numeric("waist"),
-  hip: numeric("hip"),
-  arm: numeric("arm"),
-  thigh: numeric("thigh"),
-  bodyFatPercentage: numeric("body_fat_percentage"),
-  notes: text("notes"),
-});
-
-// Diet Plans (Diyet Planları)
-export const dietPlans = pgTable("diet_plans", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
-  clientId: integer("client_id").notNull().references(() => clients.id),
-  name: text("name").notNull(),
-  description: text("description"),
-  startDate: timestamp("start_date").notNull(),
-  endDate: timestamp("end_date"),
-  dailyCalories: numeric("daily_calories"),
-  macroProtein: numeric("macro_protein"),
-  macroCarbs: numeric("macro_carbs"),
-  macroFat: numeric("macro_fat"),
-  meals: jsonb("meals").notNull(),
-  isActive: boolean("is_active").default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-// Appointments (Randevular)
-export const appointments = pgTable("appointments", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
-  clientId: integer("client_id").notNull().references(() => clients.id),
-  date: timestamp("date").notNull(),
-  duration: integer("duration").notNull(),
-  type: text("type").notNull(), // "online", "in-person"
-  notes: text("notes"),
-  status: text("status").default("scheduled"), // "scheduled", "completed", "cancelled"
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-// Activities (Aktiviteler)
-export const activities = pgTable("activities", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
-  clientId: integer("client_id").references(() => clients.id),
-  type: text("type").notNull(), // "diet_plan", "measurement", "appointment", "telegram"
-  description: text("description").notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-// Blog Articles (Blog Makaleleri)
-export const blogArticles = pgTable("blog_articles", {
-  id: serial("id").primaryKey(),
-  title: text("title").notNull(),
-  summary: text("summary").notNull(),
-  content: text("content").notNull(),
-  author: text("author").notNull(),
-  imageUrl: text("image_url"),
-  readTime: integer("read_time"),
-  publishedAt: timestamp("published_at").defaultNow(),
-});
-
-// Insert schemas
-export const insertUserSchema = createInsertSchema(users).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertClientSchema = createInsertSchema(clients).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertMeasurementSchema = createInsertSchema(measurements).omit({
-  id: true,
-});
-
-export const insertDietPlanSchema = createInsertSchema(dietPlans).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertAppointmentSchema = createInsertSchema(appointments).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertActivitySchema = createInsertSchema(activities).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertBlogArticleSchema = createInsertSchema(blogArticles).omit({
-  id: true,
-  publishedAt: true,
-});
-
-// Login schema
 export const loginSchema = z.object({
-  username: z.string().min(1, "Kullanıcı adı gerekli"),
-  password: z.string().min(1, "Şifre gerekli"),
+  email: z.string().email("Geçerli bir e-posta adresi giriniz"),
+  password: z.string().min(1, "Şifre gereklidir")
 });
 
-// Define types
-export type User = typeof users.$inferSelect;
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type Client = typeof clients.$inferSelect;
-export type InsertClient = z.infer<typeof insertClientSchema>;
-export type Measurement = typeof measurements.$inferSelect;
-export type InsertMeasurement = z.infer<typeof insertMeasurementSchema>;
-export type DietPlan = typeof dietPlans.$inferSelect;
-export type InsertDietPlan = z.infer<typeof insertDietPlanSchema>;
-export type Appointment = typeof appointments.$inferSelect;
-export type InsertAppointment = z.infer<typeof insertAppointmentSchema>;
-export type Activity = typeof activities.$inferSelect;
-export type InsertActivity = z.infer<typeof insertActivitySchema>;
-export type BlogArticle = typeof blogArticles.$inferSelect;
-export type InsertBlogArticle = z.infer<typeof insertBlogArticleSchema>;
-export type Login = z.infer<typeof loginSchema>;
+export const clientSchema = z.object({
+  _id: z.string().optional(),
+  userId: z.string(),
+  name: z.string().min(3, 'İsim en az 3 karakter olmalıdır'),
+  email: z.string().email('Geçerli bir e-posta adresi giriniz'),
+  phone: z.string().optional(),
+  birthDate: z.string().optional(),
+  gender: z.enum(['male', 'female']).optional(),
+  height: z.coerce.number().optional(),
+  startingWeight: z.coerce.number().optional(),
+  targetWeight: z.coerce.number().optional(),
+  activityLevel: z.string().optional(),
+  medicalHistory: z.string().optional(),
+  dietaryRestrictions: z.string().optional(),
+  createdAt: z.date().optional(),
+  notes: z.string().optional(),
+  profilePicture: z.string().optional(),
+  status: z.enum(['active', 'inactive']).default('active'),
+});
+
+export type Client = z.infer<typeof clientSchema>;
+
+export const measurementSchema = z.object({
+  clientId: mongoIdSchema,
+  weight: z.coerce.number().optional(),
+  height: z.coerce.number().optional(),
+  neck: z.coerce.number().optional(),
+  arm: z.coerce.number().optional(),
+  chest: z.coerce.number().optional(),
+  waist: z.coerce.number().optional(),
+  abdomen: z.coerce.number().optional(),
+  hip: z.coerce.number().optional(),
+  thigh: z.coerce.number().optional(),
+  calf: z.coerce.number().optional(),
+  notes: z.string().optional(),
+  date: z.string().default(() => new Date().toISOString()).transform(val => new Date(val)),
+  images: z.array(z.string()).optional(),
+  bodyFatPercentage: z.number().optional()
+});
+
+// Besin öğesi tipi
+export const foodItemSchema = z.object({
+  name: z.string().default(""),
+  amount: z.string().default(""),
+  calories: z.number().nonnegative("Kalori değeri negatif olamaz").default(0),
+});
+
+// Öğün tipi
+export const mealSchema = z.object({
+  name: z.string(),
+  foods: z.array(foodItemSchema),
+});
+
+export const dietPlanSchema = z.object({
+  clientId: mongoIdSchema,
+  title: z.string().min(2, "Başlık en az 2 karakter olmalıdır"),
+  content: z.string().default(""),
+  description: z.string().optional().nullable().default(""),
+  startDate: z.string().transform(val => new Date(val)),
+  endDate: z.string().optional().nullable().transform(val => val ? new Date(val) : undefined),
+  status: z.string().default("active"),
+  attachments: z.array(z.string()).optional(),
+  // Diyet planı detayları
+  dailyCalories: z.number().nonnegative().default(0),
+  macroProtein: z.number().nonnegative().default(0),
+  macroCarbs: z.number().nonnegative().default(0),
+  macroFat: z.number().nonnegative().default(0),
+  meals: z.array(mealSchema).optional()
+});
+
+export const appointmentSchema = z.object({
+  clientId: mongoIdSchema,
+  date: z.string().transform(val => new Date(val)),
+  duration: z.coerce.number().min(5, "Süre en az 5 dakika olmalıdır"),
+  status: z.string().default("scheduled"),
+  notes: z.string().optional(),
+  type: z.enum(["online", "in-person"]).optional()
+});
+
+export const activitySchema = z.object({
+  userId: mongoIdSchema,
+  type: z.string(),
+  description: z.string()
+});
+
+// Interface tanımlamaları - Client tarafında kullanım için
+export interface User {
+  _id: string;
+  email: string;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+  profilePicture?: string;
+  bio?: string;
+  phone?: string;
+}
+
+export interface Measurement {
+  _id: string;
+  clientId: string;
+  date: string;
+  weight?: number;
+  height?: number;
+  neck?: number;
+  arm?: number;
+  chest?: number;
+  waist?: number;
+  abdomen?: number;
+  hip?: number;
+  thigh?: number;
+  calf?: number;
+  notes?: string;
+  images?: string[];
+  bodyFatPercentage?: number;
+}
+
+export interface FoodItem {
+  name: string;
+  amount: string;
+  calories?: number;
+}
+
+export interface Meal {
+  name: string;
+  foods: FoodItem[];
+}
+
+export interface DietPlan {
+  _id: string;
+  clientId: string;
+  title: string;
+  startDate: Date;
+  endDate?: Date;
+  content: string;
+  status: string;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+  attachments?: string[];
+  dailyCalories?: number;
+  macroProtein?: number;
+  macroCarbs?: number;
+  macroFat?: number;
+  meals?: Meal[];
+  description?: string;
+}
+
+export interface Appointment {
+  _id: string;
+  clientId: string;
+  userId: string;
+  date: Date;
+  duration: number;
+  status: string;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  type?: string;
+}
+
+export interface Activity {
+  _id: string;
+  userId: string;
+  type: string;
+  description: string;
+  createdAt: Date;
+}

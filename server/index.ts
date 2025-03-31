@@ -1,8 +1,41 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import dotenv from "dotenv";
+import { connectDB } from "./db";
+import { MongoStorage } from "./storage";
+import cors from "cors";
+import mongoose from "mongoose";
+import { MONGODB_URI } from "./config";
+
+// .env dosyasını yükle
+dotenv.config();
+
+// MongoDB'ye bağlan
+connectDB().catch(err => {
+  console.error("MongoDB bağlantı hatası:", err);
+  process.exit(1);
+});
+
+// Storage instance'ı oluştur
+export const storage = new MongoStorage();
+
+// Örnek blog yazılarını ve aktiviteleri ekle - sadece başlangıçta
+setTimeout(async () => {
+  try {
+    // Artık örnek aktiviteler eklemiyoruz
+    // await storage.addSampleActivities();
+    console.log("Uygulama başlatıldı.");
+  } catch (error) {
+    console.error("Başlatılırken hata:", error);
+  }
+}, 2000);
 
 const app = express();
+
+// CORS için gerekli middleware
+app.use(cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -44,7 +77,7 @@ app.use((req, res, next) => {
     const message = err.message || "Internal Server Error";
 
     res.status(status).json({ message });
-    throw err;
+    console.error(err);
   });
 
   // importantly only setup vite in development and after
@@ -59,12 +92,8 @@ app.use((req, res, next) => {
   // ALWAYS serve the app on port 5000
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = 5000;
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
+  const port = process.env.PORT ? parseInt(process.env.PORT) : 5000;
+  server.listen(port, () => {
     log(`serving on port ${port}`);
   });
 })();

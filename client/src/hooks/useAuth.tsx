@@ -1,22 +1,31 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
-import { queryClient } from "@/lib/queryClient";
-import { useLocation } from "wouter";
+import { toast } from "react-hot-toast";
 
+// TypeScript Interfaces
 interface User {
-  id: number;
-  username: string;
+  _id: string; // MongoDB _id
   email: string;
-  fullName: string;
+  name?: string;
+  profilePicture?: string;
+  bio?: string;
+  phone?: string;
+  // Eski alanlar için uyumluluk
+  id?: number;
+  username?: string;
+  fullName?: string;
   profileImage?: string;
+}
+
+interface LoginData {
+  email: string;
+  password: string;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  register: (userData: RegisterData) => Promise<void>;
+  login: (data: LoginData) => Promise<User | void>;
+  register: (userData: RegisterData) => Promise<User | void>;
   logout: () => void;
   updateUser: (userData: Partial<User>) => void;
 }
@@ -31,10 +40,31 @@ interface LoginResponse {
 }
 
 interface RegisterData {
-  username: string;
+  username?: string;  // Artık opsiyonel
   password: string;
   email: string;
   fullName: string;
+}
+
+// API istekleri için yardımcı fonksiyon
+async function apiRequest(method: string, url: string, data?: any) {
+  const token = localStorage.getItem("token");
+  
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: data ? JSON.stringify(data) : undefined,
+  });
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || "Bir hata oluştu");
+  }
+  
+  return response;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -42,8 +72,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const { toast } = useToast();
-  const [_, setLocation] = useLocation();
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -78,53 +106,52 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     fetchUser();
   }, []);
 
-  const login = async (username: string, password: string) => {
+  const login = async (data: LoginData): Promise<User | void> => {
     try {
-      const res = await apiRequest("POST", "/api/auth/login", { username, password });
-      const data: LoginResponse = await res.json();
+      // Backend'in beklediği alan adlarına dönüştür
+      const loginData = {
+        email: data.email,
+        password: data.password
+      };
       
-      localStorage.setItem("token", data.token);
-      setUser(data.user);
+      const res = await apiRequest("POST", "/api/auth/login", loginData);
+      const responseData: LoginResponse = await res.json();
       
-      toast({
-        title: "Giriş Başarılı",
-        description: "Hoş geldiniz, " + data.user.fullName,
-      });
+      localStorage.setItem("token", responseData.token);
+      setUser(responseData.user);
       
-      setLocation("/");
+      toast.success(`Hoş geldiniz, ${responseData.user.name || responseData.user.fullName || responseData.user.email}`);
       
-      // Invalidate queries to refresh data
-      queryClient.invalidateQueries();
+      return responseData.user;
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Giriş Başarısız",
-        description: error instanceof Error ? error.message : "Bir hata oluştu",
-      });
+      const errorMessage = error instanceof Error ? error.message : "Giriş sırasında bir hata oluştu";
+      toast.error(errorMessage);
       throw error;
     }
   };
 
-  const register = async (userData: RegisterData) => {
+  const register = async (userData: RegisterData): Promise<User | void> => {
     try {
-      const res = await apiRequest("POST", "/api/auth/register", userData);
+      // Backend'in beklediği alan adlarına dönüştür
+      const backendUserData = {
+        name: userData.fullName, // fullName -> name
+        email: userData.email,
+        password: userData.password,
+        username: userData.username
+      };
+      
+      const res = await apiRequest("POST", "/api/auth/register", backendUserData);
       const data: LoginResponse = await res.json();
       
       localStorage.setItem("token", data.token);
       setUser(data.user);
       
-      toast({
-        title: "Kayıt Başarılı",
-        description: "Hoş geldiniz, " + data.user.fullName,
-      });
+      toast.success(`Hoş geldiniz, ${data.user.name || data.user.fullName || data.user.email}`);
       
-      setLocation("/");
+      return data.user;
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Kayıt Başarısız",
-        description: error instanceof Error ? error.message : "Bir hata oluştu",
-      });
+      const errorMessage = error instanceof Error ? error.message : "Kayıt sırasında bir hata oluştu";
+      toast.error(errorMessage);
       throw error;
     }
   };
@@ -133,15 +160,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     localStorage.removeItem("token");
     setUser(null);
     
-    // Clear all query cache
-    queryClient.clear();
-    
-    setLocation("/login");
-    
-    toast({
-      title: "Çıkış Yapıldı",
-      description: "Güvenli bir şekilde çıkış yaptınız.",
-    });
+    toast.success("Güvenli bir şekilde çıkış yaptınız.");
   };
   
   const updateUser = (userData: Partial<User>) => {

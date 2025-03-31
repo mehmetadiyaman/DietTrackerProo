@@ -2,6 +2,19 @@ import React from "react";
 import { formatDate } from "@/utils/formatDate";
 import { Appointment, Client } from "@shared/schema";
 
+// Güvenli tarih formatlama fonksiyonu
+const formatDateSafe = (dateInput: Date | string | undefined): string => {
+  if (!dateInput) return '-';
+  
+  try {
+    const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+    return formatDate(date);
+  } catch (e) {
+    console.error('Tarih formatlama hatası:', e);
+    return typeof dateInput === 'string' ? dateInput : '-';
+  }
+};
+
 interface AppointmentWithClient extends Appointment {
   client: Client;
 }
@@ -33,34 +46,38 @@ export function AppointmentList({ appointments, loading, emptyMessage = "Yaklaş
   return (
     <ul className="divide-y divide-gray-200 dark:divide-gray-700">
       {appointments.map((appointment) => (
-        <li key={appointment.id}>
+        <li key={appointment._id}>
           <div className="px-6 py-4 flex items-center">
             <div className="min-w-0 flex-1 flex items-center">
               <div className="flex-shrink-0">
-                {appointment.client.profileImage ? (
+                {appointment.client.profilePicture ? (
                   <img 
                     className="h-12 w-12 rounded-full object-cover" 
-                    src={appointment.client.profileImage} 
-                    alt={`${appointment.client.fullName} profil resmi`} 
+                    src={appointment.client.profilePicture} 
+                    alt={`${appointment.client.name} profil resmi`} 
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      e.currentTarget.parentElement?.classList.add('fallback-icon');
+                    }}
                   />
                 ) : (
                   <div className="h-12 w-12 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                    <i className="fas fa-user text-gray-500 dark:text-gray-400"></i>
+                    <i className={`fas fa-${appointment.client.gender === 'female' ? 'female' : 'male'} text-gray-500 dark:text-gray-400`}></i>
                   </div>
                 )}
               </div>
               <div className="min-w-0 flex-1 px-4">
                 <div>
                   <p className="text-sm font-medium text-primary dark:text-primary-light truncate">
-                    {appointment.client.fullName}
+                    {appointment.client.name}
                   </p>
                   <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    <i className="far fa-clock mr-1"></i> {formatDate(appointment.date)}
+                    <i className="far fa-clock mr-1"></i> {formatDateSafe(appointment.date)}
                   </p>
                 </div>
               </div>
             </div>
-            <div className="ml-6 flex-shrink-0 flex space-x-2">
+            <div className="ml-6 flex-shrink-0">
               <button 
                 type="button" 
                 className={`inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-white ${
@@ -71,12 +88,6 @@ export function AppointmentList({ appointments, loading, emptyMessage = "Yaklaş
               >
                 <i className={`fas fa-${appointment.type === 'online' ? 'video' : 'user'} mr-1`}></i>
                 {appointment.type === 'online' ? 'Görüntülü' : 'Yüz yüze'}
-              </button>
-              <button 
-                type="button" 
-                className="inline-flex items-center px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-xs font-medium rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-              >
-                <i className="fas fa-ellipsis-h"></i>
               </button>
             </div>
           </div>

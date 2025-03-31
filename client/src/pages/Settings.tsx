@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -6,17 +6,10 @@ import { z } from "zod";
 import { 
   Card, 
   CardContent, 
-  CardDescription, 
-  CardFooter, 
+  CardDescription,  
   CardHeader, 
   CardTitle 
 } from "@/components/ui/card";
-import { 
-  Tabs, 
-  TabsContent, 
-  TabsList, 
-  TabsTrigger 
-} from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -25,21 +18,28 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/useAuth";
+import { toast } from "react-hot-toast";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Separator } from "@/components/ui/separator";
+import { AlertCircle, Camera, CheckCircle, Loader2 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-// Profile form schema
+// Profil form şeması
 const profileFormSchema = z.object({
-  fullName: z.string().min(3, "Ad Soyad en az 3 karakter olmalıdır"),
+  name: z.string().min(3, "Ad Soyad en az 3 karakter olmalıdır"),
   email: z.string().email("Geçerli bir e-posta adresi giriniz"),
-  profileImage: z.string().optional(),
+  profilePicture: z.string().optional(),
+  bio: z.string().optional(),
+  phone: z.string().optional(),
 });
 
-// Password form schema
+// Şifre form şeması
 const passwordFormSchema = z.object({
   currentPassword: z.string().min(1, "Mevcut şifre gerekli"),
   newPassword: z.string().min(6, "Yeni şifre en az 6 karakter olmalıdır"),
@@ -53,21 +53,38 @@ type ProfileFormValues = z.infer<typeof profileFormSchema>;
 type PasswordFormValues = z.infer<typeof passwordFormSchema>;
 
 export default function Settings() {
-  const { toast } = useToast();
-  const { user, updateUser } = useAuth();
-  const [activeTab, setActiveTab] = useState("profile");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [imageRefreshKey, setImageRefreshKey] = useState(0);
+  const [isProfileLoading, setIsProfileLoading] = useState(false);
 
-  // Profile form
+  // Kullanıcı verilerini çek
+  const { data: userData, isLoading: userDataLoading } = useQuery({
+    queryKey: ['/api/auth/me'],
+    queryFn: async () => {
+      const response = await fetch('/api/auth/me', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (!response.ok) throw new Error('Kullanıcı bilgileri alınamadı');
+      return response.json();
+    }
+  });
+
+  // Profil formu
   const profileForm = useForm<ProfileFormValues>({
     resolver: zodResolver(profileFormSchema),
     defaultValues: {
-      fullName: user?.fullName || "",
-      email: user?.email || "",
-      profileImage: user?.profileImage || "",
+      name: "",
+      email: "",
+      profilePicture: "",
+      bio: "",
+      phone: "",
     },
   });
 
-  // Password form
+  // Şifre formu
   const passwordForm = useForm<PasswordFormValues>({
     resolver: zodResolver(passwordFormSchema),
     defaultValues: {
@@ -77,82 +94,312 @@ export default function Settings() {
     },
   });
 
-  // Update profile mutation
+  // Kullanıcı verisi geldiğinde form alanlarını doldur
+  useEffect(() => {
+    if (userData) {
+      profileForm.reset({
+        name: userData.name || "",
+        email: userData.email || "",
+        profilePicture: userData.profilePicture || "",
+        bio: userData.bio || "",
+        phone: userData.phone || "",
+      });
+    }
+  }, [userData, profileForm]);
+
+  // Profil güncelleme mutation
   const updateProfileMutation = useMutation({
     mutationFn: async (data: ProfileFormValues) => {
-      const response = await apiRequest("PUT", `/api/users/${user?.id}`, data);
-      return response.json();
+      try {
+        // Sadece değişmiş profil verilerini gönder
+        const profileUpdateData: Partial<ProfileFormValues> = {};
+        if (data.name !== userData?.name) profileUpdateData.name = data.name;
+        if (data.email !== userData?.email) profileUpdateData.email = data.email;
+        if (data.bio !== userData?.bio) profileUpdateData.bio = data.bio;
+        if (data.phone !== userData?.phone) profileUpdateData.phone = data.phone;
+        if (data.profilePicture !== userData?.profilePicture) profileUpdateData.profilePicture = data.profilePicture;
+        
+        // Hiçbir veri değişmemişse işlemi iptal et
+        if (Object.keys(profileUpdateData).length === 0) {
+          toast.success('Değiştirilecek bilgi bulunmadı.');
+          return;
+        }
+        
+        // API isteği gönder
+        const response = await apiRequest("PUT", `/api/auth/profile`, profileUpdateData);
+        const responseData = await response.json();
+        return responseData;
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Bilinmeyen bir hata oluştu";
+        toast.error(`Profil güncellenirken bir hata oluştu: ${errorMessage}`);
+      }
     },
     onSuccess: (data) => {
-      updateUser(data);
-      toast({
-        title: "Profil Güncellendi",
-        description: "Profil bilgileriniz başarıyla güncellendi.",
-      });
+      toast.success("Profil bilgileri başarıyla güncellendi");
+      
+      // Önbelleği tamamen temizle ve yeni verileri çek
+      queryClient.resetQueries({ queryKey: ['/api/auth/me'] });
+      setTimeout(() => {
+        queryClient.refetchQueries({ queryKey: ['/api/auth/me'] });
+      }, 100);
     },
-    onError: (error: Error) => {
-      toast({
-        variant: "destructive",
-        title: "Hata",
-        description: `Profil güncellenirken bir hata oluştu: ${error.message}`,
-      });
+    onError: (error: any) => {
+      toast.error(`Profil güncellenirken bir hata oluştu: ${error?.message || "Bilinmeyen bir hata oluştu"}`);
     }
   });
 
-  // Change password mutation
+  // Şifre değiştirme mutation
   const changePasswordMutation = useMutation({
     mutationFn: async (data: { currentPassword: string, newPassword: string }) => {
-      const response = await apiRequest("PUT", `/api/users/${user?.id}/password`, data);
-      return response.json();
+      try {
+        const response = await apiRequest("PUT", `/api/auth/password`, data);
+        const responseData = await response.json();
+        return responseData;
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Bilinmeyen bir hata oluştu";
+        toast.error(`Şifre değiştirilirken bir hata oluştu: ${errorMessage}`);
+      }
     },
     onSuccess: () => {
-      passwordForm.reset({
-        currentPassword: "",
-        newPassword: "",
-        confirmPassword: "",
-      });
-      toast({
-        title: "Şifre Değiştirildi",
-        description: "Şifreniz başarıyla değiştirildi.",
-      });
+      passwordForm.reset();
+      toast.success("Şifreniz başarıyla değiştirildi");
     },
-    onError: (error: Error) => {
-      toast({
-        variant: "destructive",
-        title: "Hata",
-        description: `Şifre değiştirilirken bir hata oluştu: ${error.message}`,
-      });
+    onError: (error: any) => {
+      toast.error(`Şifre değiştirilirken bir hata oluştu: ${error?.message || "Bilinmeyen bir hata oluştu"}`);
     }
   });
 
-  // Handle profile form submission
-  function onSubmitProfile(values: ProfileFormValues) {
-    updateProfileMutation.mutate(values);
-  }
+  // Profil fotoğrafı yükleme işlevi
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-  // Handle password form submission
+    // Desteklenen resim formatları
+    const validTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      toast.error("Lütfen geçerli bir resim formatı yükleyin (JPEG, PNG, WebP)");
+      return;
+    }
+
+    const uploadToastId = 'uploading-image';
+    try {
+      setUploading(true);
+      toast.loading('Profil fotoğrafı yükleniyor...', { id: uploadToastId });
+      
+      // Sadece resim dosyaları için izin ver
+      if (!file.type.startsWith('image/')) {
+        throw new Error('Lütfen sadece resim dosyası yükleyin');
+      }
+      
+      // Dosya boyutu kontrolü (10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error('Dosya boyutu 10MB\'tan küçük olmalıdır');
+      }
+      
+      // FormData oluştur
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', 'profile_pictures'); // Profil resimleri için özel klasör
+      
+      // Token'ı al
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Oturum bulunamadı. Lütfen tekrar giriş yapın.');
+      }
+      
+      // Backend API'ye isteği gönder
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      // Yanıtı işle
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || `Yükleme başarısız: HTTP ${response.status}`);
+        } else {
+          const text = await response.text();
+          const truncatedText = text.length > 100 ? text.substring(0, 100) + '...' : text;
+          throw new Error(`Yükleme başarısız: HTTP ${response.status} (${truncatedText})`);
+        }
+      }
+      
+      // Başarılı yanıtı JSON olarak işle
+      const data = await response.json();
+      
+      if (data.url) {
+        // Önbelleği atlatmak için URL'e zaman damgası ekle
+        const cacheBreaker = `?t=${Date.now()}`;
+        const imageUrlWithTimestamp = `${data.url}${cacheBreaker}`;
+        
+        toast.dismiss(uploadToastId);
+        toast.success("Profil fotoğrafı başarıyla yüklendi");
+        
+        // Form değerini güncelle
+        profileForm.setValue('profilePicture', data.url); // Asıl URL'i kaydet
+        
+        // Profil bilgilerini güncelle
+        const profileData = profileForm.getValues();
+        
+        try {
+          await updateProfileMutation.mutateAsync(profileData);
+          
+          // Güncelleme başarılı olduğunda, önbelleği temizleyip yeniden yükle
+          await queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+          await queryClient.refetchQueries({ queryKey: ['/api/auth/me'] });
+          
+          // Yüklenen resmi sayfada göstermek için
+          setImageRefreshKey(Date.now());
+        } catch (profileError: unknown) {
+          const errorMessage = profileError instanceof Error ? profileError.message : "Bilinmeyen bir hata oluştu";
+          toast.error(`Profil resmi yüklendi fakat profil güncellenemedi: ${errorMessage}`);
+        }
+      } else {
+        throw new Error('Resim yüklenemedi: Sunucu geçerli bir URL döndürmedi');
+      }
+    } catch (error: unknown) {
+      toast.dismiss(uploadToastId);
+      const errorMessage = error instanceof Error ? error.message : "Bilinmeyen bir hata oluştu";
+      toast.error(`Resim yüklenirken bir hata oluştu: ${errorMessage}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Profil form gönderimi
+  const handleProfileSubmit = async (values: ProfileFormValues) => {
+    setIsProfileLoading(true);
+    
+    // Sadece değişmiş profil verilerini gönder
+    const profileUpdateData: Partial<ProfileFormValues> = {};
+    if (values.name !== userData?.name) profileUpdateData.name = values.name;
+    if (values.email !== userData?.email) profileUpdateData.email = values.email;
+    if (values.bio !== userData?.bio) profileUpdateData.bio = values.bio;
+    if (values.phone !== userData?.phone) profileUpdateData.phone = values.phone;
+    if (values.profilePicture !== userData?.profilePicture) profileUpdateData.profilePicture = values.profilePicture;
+    
+    // Hiçbir veri değişmemişse işlemi iptal et
+    if (Object.keys(profileUpdateData).length === 0) {
+      toast.success('Değiştirilecek bilgi bulunmadı.');
+      setIsProfileLoading(false);
+      return;
+    }
+    
+    try {
+      await updateProfileMutation.mutateAsync(values);
+      
+      toast.success('Profil bilgileri başarıyla güncellendi');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Bilinmeyen bir hata oluştu";
+      toast.error(`Profil güncellenirken bir hata oluştu: ${errorMessage}`);
+    } finally {
+      setIsProfileLoading(false);
+    }
+  };
+
+  // Şifre form gönderimi
   function onSubmitPassword(values: PasswordFormValues) {
     const { currentPassword, newPassword } = values;
     changePasswordMutation.mutate({ currentPassword, newPassword });
+  }
+
+  if (userDataLoading) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-100px)]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
   }
 
   return (
     <div className="py-6 px-4 sm:px-6 lg:px-8 pb-24 lg:pb-6">
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white font-heading">Hesap Ayarları</h2>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Profil bilgilerinizi ve uygulama ayarlarınızı yönetin.</p>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Profil bilgilerinizi ve şifrenizi bu sayfadan yönetin.</p>
       </div>
 
-      <Tabs defaultValue="profile" value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-6">
-          <TabsTrigger value="profile">Profil</TabsTrigger>
-          <TabsTrigger value="password">Şifre</TabsTrigger>
-          <TabsTrigger value="appearance">Görünüm</TabsTrigger>
-          <TabsTrigger value="notifications">Bildirimler</TabsTrigger>
-        </TabsList>
-        
-        <TabsContent value="profile">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Sol Taraf - Profil Fotoğrafı ve Bilgiler */}
+        <div className="lg:col-span-1">
           <Card>
+            <CardHeader>
+              <CardTitle>Profil Fotoğrafı</CardTitle>
+              <CardDescription>
+                Danışanlarınızın sizi tanıyabileceği bir fotoğraf ekleyin.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col items-center space-y-4">
+              <div className="relative">
+                <Avatar className="h-40 w-40">
+                  {profileForm.watch("profilePicture") ? (
+                    <AvatarImage 
+                      src={`${profileForm.watch("profilePicture")}?t=${imageRefreshKey}`} 
+                      alt="Profil Resmi" 
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${userData?.name || 'U'}&size=128`;
+                      }}
+                    />
+                  ) : (
+                    <AvatarFallback className="text-2xl">
+                      {userData?.name?.charAt(0) || "U"}
+                    </AvatarFallback>
+                  )}
+                </Avatar>
+                
+                <Button 
+                  variant="secondary" 
+                  size="icon" 
+                  className="absolute bottom-1 right-1 rounded-full h-9 w-9"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                >
+                  {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}
+                </Button>
+                
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleImageUpload} 
+                  accept=".jpg,.jpeg,.png,.webp" 
+                  className="hidden" 
+                />
+              </div>
+              
+              <div className="text-center">
+                <h3 className="text-lg font-semibold">{userData?.name}</h3>
+                <p className="text-sm text-muted-foreground">{userData?.email}</p>
+              </div>
+              
+              <div className="bg-muted p-4 rounded-lg w-full">
+                <h4 className="font-medium mb-2">Hesap Bilgileri</h4>
+                <ul className="space-y-2 text-sm">
+                  <li className="flex justify-between">
+                    <span className="text-muted-foreground">Üyelik Tarihi:</span>
+                    <span>
+                      {userData?.createdAt 
+                        ? new Date(userData.createdAt).toLocaleDateString('tr-TR') 
+                        : 'Belirtilmemiş'}
+                    </span>
+                  </li>
+                  <li className="flex justify-between">
+                    <span className="text-muted-foreground">Telefon:</span>
+                    <span>{userData?.phone || 'Belirtilmemiş'}</span>
+                  </li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+        
+        {/* Sağ Taraf - Form */}
+        <div className="lg:col-span-2">
+          {/* Profil Bilgileri Formu */}
+          <Card className="mb-8">
             <CardHeader>
               <CardTitle>Profil Bilgileri</CardTitle>
               <CardDescription>
@@ -161,110 +408,78 @@ export default function Settings() {
             </CardHeader>
             <CardContent>
               <Form {...profileForm}>
-                <form onSubmit={profileForm.handleSubmit(onSubmitProfile)} className="space-y-6">
-                  <div className="flex flex-col md:flex-row gap-6">
-                    <div className="w-full md:w-2/3 space-y-4">
-                      <FormField
-                        control={profileForm.control}
-                        name="fullName"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Ad Soyad</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Ad Soyad" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <FormField
-                        control={profileForm.control}
-                        name="email"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>E-posta</FormLabel>
-                            <FormControl>
-                              <Input type="email" placeholder="eposta@ornek.com" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <FormField
-                        control={profileForm.control}
-                        name="profileImage"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Profil Resmi URL</FormLabel>
-                            <FormControl>
-                              <Input placeholder="https://example.com/profile.jpg" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              Resim URL'si girin veya Cloudinary entegrasyonu için ayarları yapılandırın.
-                            </p>
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                    
-                    <div className="w-full md:w-1/3 flex flex-col items-center justify-start">
-                      <div className="relative">
-                        <div className="h-32 w-32 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 mb-4">
-                          {profileForm.watch("profileImage") ? (
-                            <img 
-                              src={profileForm.watch("profileImage")} 
-                              alt="Profil resmi önizleme" 
-                              className="h-full w-full object-cover"
-                              onError={(e) => {
-                                e.currentTarget.src = "https://via.placeholder.com/150";
-                              }}
-                            />
-                          ) : user?.profileImage ? (
-                            <img 
-                              src={user.profileImage} 
-                              alt="Mevcut profil resmi" 
-                              className="h-full w-full object-cover"
-                              onError={(e) => {
-                                e.currentTarget.src = "https://via.placeholder.com/150";
-                              }}
-                            />
-                          ) : (
-                            <div className="h-full w-full flex items-center justify-center">
-                              <i className="fas fa-user text-gray-400 text-4xl"></i>
-                            </div>
-                          )}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="absolute bottom-0 right-0"
-                          onClick={() => {
-                            /* Cloudinary veya resim yükleme işlevi burada olacak */
-                            toast({
-                              title: "Resim Yükleme",
-                              description: "Bu özellik şu anda geliştirme aşamasındadır.",
-                            });
-                          }}
-                        >
-                          <i className="fas fa-camera mr-2"></i>
-                          Değiştir
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
+                <form onSubmit={profileForm.handleSubmit(handleProfileSubmit)} className="space-y-6">
+                  <FormField
+                    control={profileForm.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Ad Soyad</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Ad Soyad" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={profileForm.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>E-posta</FormLabel>
+                        <FormControl>
+                          <Input type="email" placeholder="eposta@ornek.com" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={profileForm.control}
+                    name="phone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Telefon</FormLabel>
+                        <FormControl>
+                          <Input placeholder="+90 555 123 4567" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={profileForm.control}
+                    name="bio"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Hakkımda</FormLabel>
+                        <FormControl>
+                          <Textarea 
+                            placeholder="Kendinizi kısaca tanıtın..." 
+                            className="resize-none min-h-[120px]"
+                            {...field} 
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Bu bilgi danışan profillerinizde görünecektir.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                   
                   <Button 
                     type="submit" 
-                    className="w-full md:w-auto"
-                    disabled={updateProfileMutation.isPending}
+                    className="w-full sm:w-auto"
+                    disabled={isProfileLoading}
                   >
-                    {updateProfileMutation.isPending ? (
+                    {isProfileLoading ? (
                       <>
-                        <i className="fas fa-spinner fa-spin mr-2"></i> Kaydediliyor...
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Kaydediliyor...
                       </>
                     ) : (
                       "Profili Kaydet"
@@ -274,9 +489,8 @@ export default function Settings() {
               </Form>
             </CardContent>
           </Card>
-        </TabsContent>
-        
-        <TabsContent value="password">
+          
+          {/* Şifre Değiştirme Formu */}
           <Card>
             <CardHeader>
               <CardTitle>Şifre Değiştir</CardTitle>
@@ -286,7 +500,7 @@ export default function Settings() {
             </CardHeader>
             <CardContent>
               <Form {...passwordForm}>
-                <form onSubmit={passwordForm.handleSubmit(onSubmitPassword)} className="space-y-4">
+                <form onSubmit={passwordForm.handleSubmit(onSubmitPassword)} className="space-y-6">
                   <FormField
                     control={passwordForm.control}
                     name="currentPassword"
@@ -310,6 +524,9 @@ export default function Settings() {
                         <FormControl>
                           <Input type="password" placeholder="••••••••" {...field} />
                         </FormControl>
+                        <FormDescription>
+                          Şifreniz en az 6 karakter uzunluğunda olmalıdır.
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -329,14 +546,22 @@ export default function Settings() {
                     )}
                   />
                   
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Şifre Güvenliği</AlertTitle>
+                    <AlertDescription>
+                      Güçlü bir şifre seçin. Büyük-küçük harf, rakam ve özel karakter içeren şifreler daha güvenlidir.
+                    </AlertDescription>
+                  </Alert>
+                  
                   <Button 
                     type="submit" 
-                    className="w-full md:w-auto"
+                    className="w-full sm:w-auto"
                     disabled={changePasswordMutation.isPending}
                   >
                     {changePasswordMutation.isPending ? (
                       <>
-                        <i className="fas fa-spinner fa-spin mr-2"></i> Kaydediliyor...
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Değiştiriliyor...
                       </>
                     ) : (
                       "Şifreyi Değiştir"
@@ -346,171 +571,8 @@ export default function Settings() {
               </Form>
             </CardContent>
           </Card>
-        </TabsContent>
-        
-        <TabsContent value="appearance">
-          <Card>
-            <CardHeader>
-              <CardTitle>Görünüm Ayarları</CardTitle>
-              <CardDescription>
-                Uygulama teması ve görünüm tercihlerinizi özelleştirin.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-lg font-medium mb-2">Tema</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="border rounded-lg p-4 flex items-center space-x-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <div className="h-6 w-6 bg-white dark:bg-gray-900 rounded-full border"></div>
-                      <div>
-                        <p className="font-medium">Açık</p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Varsayılan açık tema</p>
-                      </div>
-                    </div>
-                    
-                    <div className="border rounded-lg p-4 flex items-center space-x-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <div className="h-6 w-6 bg-gray-900 dark:bg-gray-700 rounded-full border"></div>
-                      <div>
-                        <p className="font-medium">Koyu</p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Varsayılan koyu tema</p>
-                      </div>
-                    </div>
-                    
-                    <div className="border rounded-lg p-4 flex items-center space-x-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <div className="h-6 w-6 rounded-full border overflow-hidden">
-                        <div className="h-full w-1/2 bg-white dark:bg-gray-300 float-left"></div>
-                        <div className="h-full w-1/2 bg-gray-900 dark:bg-gray-700 float-right"></div>
-                      </div>
-                      <div>
-                        <p className="font-medium">Sistem</p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Sistem ayarları ile eşleşir</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                <div>
-                  <h3 className="text-lg font-medium mb-2">Renk Şeması</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="border rounded-lg p-2 flex flex-col items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <div className="h-8 w-8 bg-green-500 rounded-full mb-2"></div>
-                      <p className="text-sm font-medium">Yeşil</p>
-                    </div>
-                    
-                    <div className="border rounded-lg p-2 flex flex-col items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <div className="h-8 w-8 bg-blue-500 rounded-full mb-2"></div>
-                      <p className="text-sm font-medium">Mavi</p>
-                    </div>
-                    
-                    <div className="border rounded-lg p-2 flex flex-col items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <div className="h-8 w-8 bg-purple-500 rounded-full mb-2"></div>
-                      <p className="text-sm font-medium">Mor</p>
-                    </div>
-                    
-                    <div className="border rounded-lg p-2 flex flex-col items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <div className="h-8 w-8 bg-amber-500 rounded-full mb-2"></div>
-                      <p className="text-sm font-medium">Amber</p>
-                    </div>
-                  </div>
-                </div>
-                
-                <Button>Ayarları Kaydet</Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="notifications">
-          <Card>
-            <CardHeader>
-              <CardTitle>Bildirim Ayarları</CardTitle>
-              <CardDescription>
-                Hangi bildirimler için uyarı almak istediğinizi belirleyin.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">E-posta Bildirimleri</h3>
-                  
-                  <div className="flex items-center justify-between py-3 border-b">
-                    <div>
-                      <h4 className="font-medium">Randevu Hatırlatmaları</h4>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Yaklaşan randevularınız için hatırlatma e-postaları.</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" className="sr-only peer" defaultChecked />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                    </label>
-                  </div>
-                  
-                  <div className="flex items-center justify-between py-3 border-b">
-                    <div>
-                      <h4 className="font-medium">Diyet Planı Güncellemeleri</h4>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Diyet planlarında yapılan değişiklikler için bildirimler.</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" className="sr-only peer" defaultChecked />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                    </label>
-                  </div>
-                  
-                  <div className="flex items-center justify-between py-3 border-b">
-                    <div>
-                      <h4 className="font-medium">Danışan Mesajları</h4>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Danışanlarınızdan gelen mesajlar için bildirimler.</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" className="sr-only peer" defaultChecked />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                    </label>
-                  </div>
-                  
-                  <div className="flex items-center justify-between py-3">
-                    <div>
-                      <h4 className="font-medium">Pazarlama E-postaları</h4>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Özel teklifler, güncellemeler ve haberler.</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" className="sr-only peer" />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                    </label>
-                  </div>
-                </div>
-                
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Sistem Bildirimleri</h3>
-                  
-                  <div className="flex items-center justify-between py-3 border-b">
-                    <div>
-                      <h4 className="font-medium">Tarayıcı Bildirimleri</h4>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Masaüstü bildirimleri.</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" className="sr-only peer" defaultChecked />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                    </label>
-                  </div>
-                  
-                  <div className="flex items-center justify-between py-3">
-                    <div>
-                      <h4 className="font-medium">Ses Bildirimleri</h4>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Bildirimler için ses efektleri.</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" className="sr-only peer" />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                    </label>
-                  </div>
-                </div>
-                
-                <Button>Ayarları Kaydet</Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
     </div>
   );
 }
